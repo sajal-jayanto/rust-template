@@ -31,6 +31,15 @@ pub fn internal_error(message: impl Into<String>) -> ValidationRejection {
   (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse::message(message)))
 }
 
+/// Logs the underlying error (e.g. a `sqlx::Error`) via `tracing::error!` before
+/// building the generic 500 response, so the client-facing message can stay vague
+/// without losing the real cause from the logs. Use in place of
+/// `map_err(|_| internal_error(...))`, e.g. `map_err(|err| log_internal_error(err, "failed to fetch samples"))`.
+pub fn log_internal_error(err: impl std::fmt::Display, message: &str) -> ValidationRejection {
+  tracing::error!(%err, "{message}");
+  internal_error(message)
+}
+
 /// Builds a 404 response with a plain error message. Shared so any service can
 /// map a missing row to a consistent error shape without redefining it.
 pub fn not_found(message: impl Into<String>) -> ValidationRejection {

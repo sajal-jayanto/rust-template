@@ -2,7 +2,7 @@ use axum::{Extension, Json, http::StatusCode};
 use sqlx::PgPool;
 
 use crate::db;
-use crate::middleware::validation::{internal_error, not_found, ErrorResponse, ValidatedJson, ValidatedPath};
+use crate::middleware::validation::{log_internal_error, not_found, ErrorResponse, ValidatedJson, ValidatedPath};
 use crate::models::sample::{CreateSample, Sample, SampleIdParams, SwapSampleNames, UpdateSample};
 
 pub async fn get_all_sample(
@@ -14,7 +14,7 @@ pub async fn get_all_sample(
     "id, name, created_at"
   )
   .await
-  .map_err(|_| internal_error("failed to fetch samples"))?;
+  .map_err(|err| log_internal_error(err, "failed to fetch samples"))?;
 
   Ok(Json(samples))
 }
@@ -31,7 +31,7 @@ pub async fn get_sample_by_id(
     params.id.into(),
   )
   .await
-  .map_err(|_| internal_error("failed to fetch sample"))?
+  .map_err(|err| log_internal_error(err, "failed to fetch sample"))?
   .ok_or_else(|| not_found("sample not found"))?;
 
   Ok(Json(sample))
@@ -51,7 +51,7 @@ pub async fn create_sample(
     "id, name, created_at",
   )
   .await
-  .map_err(|_| internal_error("failed to create sample"))?;
+  .map_err(|err| log_internal_error(err, "failed to create sample"))?;
 
   Ok((StatusCode::CREATED, Json(sample)))
 }
@@ -73,10 +73,28 @@ pub async fn update_sample(
     "id, name, created_at",
   )
   .await
-  .map_err(|_| internal_error("failed to update sample"))?
+  .map_err(|err| log_internal_error(err, "failed to update sample"))?
   .ok_or_else(|| not_found("sample not found"))?;
 
   Ok(Json(sample))
+}
+
+pub async fn delete_sample(
+  Extension(pool): Extension<PgPool>,
+  ValidatedPath(params): ValidatedPath<SampleIdParams>,
+) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
+  db::delete::<Sample, _>(
+    &pool, 
+    "sample_table", 
+    "id", 
+    params.id.into(), 
+    "id"
+  )
+  .await
+  .map_err(|err| log_internal_error(err, "failed to delete sample"))?
+  .ok_or_else(|| not_found("sample not found"))?;
+
+  Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn swap_sample_names(
@@ -86,7 +104,7 @@ pub async fn swap_sample_names(
   let mut tx = pool
     .begin()
     .await
-    .map_err(|_| internal_error("failed to start transaction"))?;
+    .map_err(|err| log_internal_error(err, "failed to start transaction"))?;
 
   let first = db::find_one::<Sample, _>(
     &mut *tx,
@@ -96,7 +114,7 @@ pub async fn swap_sample_names(
     payload.first_id.into(),
   )
   .await
-  .map_err(|_| internal_error("failed to fetch sample"))?
+  .map_err(|err| log_internal_error(err, "failed to fetch sample"))?
   .ok_or_else(|| not_found("sample not found"))?;
 
   let second = db::find_one::<Sample, _>(
@@ -107,7 +125,7 @@ pub async fn swap_sample_names(
     payload.second_id.into(),
   )
   .await
-  .map_err(|_| internal_error("failed to fetch sample"))?
+  .map_err(|err| log_internal_error(err, "failed to fetch sample"))?
   .ok_or_else(|| not_found("sample not found"))?;
 
   let updated_first = db::update::<Sample, _>(
@@ -120,7 +138,7 @@ pub async fn swap_sample_names(
     "id, name, created_at",
   )
   .await
-  .map_err(|_| internal_error("failed to update sample"))?
+  .map_err(|err| log_internal_error(err, "failed to update sample"))?
   .ok_or_else(|| not_found("sample not found"))?;
 
   let updated_second = db::update::<Sample, _>(
@@ -133,12 +151,12 @@ pub async fn swap_sample_names(
     "id, name, created_at",
   )
   .await
-  .map_err(|_| internal_error("failed to update sample"))?
+  .map_err(|err| log_internal_error(err, "failed to update sample"))?
   .ok_or_else(|| not_found("sample not found"))?;
 
   tx.commit()
     .await
-    .map_err(|_| internal_error("failed to commit transaction"))?;
+    .map_err(|err| log_internal_error(err, "failed to commit transaction"))?;
 
   Ok(Json(vec![updated_first, updated_second]))
 }

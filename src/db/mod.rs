@@ -244,3 +244,30 @@ where
 
   builder.build_query_as::<T>().fetch_optional(executor).await
 }
+
+/// Builds and runs `DELETE FROM <table> WHERE <search_by> = <search_value> RETURNING <returning>`,
+/// returning the deleted row, or `None` when no row matched. Lets any service delete a row
+/// without hand-writing the query, e.g.
+/// `db::delete::<Sample>(&pool, "sample_table", "id", id.into(), "id, name, created_at")`.
+///
+/// `executor` accepts either a `&PgPool` or a transaction (`&mut *tx`), so the delete
+/// can optionally run as part of a larger transaction.
+pub async fn delete<'c, T, E>(
+  executor: E,
+  table: &str,
+  search_by: &str,
+  search_value: SqlParam,
+  returning: &str,
+) -> Result<Option<T>, sqlx::Error>
+where
+  T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+  E: Executor<'c, Database = Postgres>,
+{
+  let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(format!("DELETE FROM {table} WHERE {search_by} = "));
+
+  bind_param(&mut builder, search_value);
+
+  builder.push(format!(" RETURNING {returning}"));
+
+  builder.build_query_as::<T>().fetch_optional(executor).await
+}

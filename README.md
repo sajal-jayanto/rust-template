@@ -73,3 +73,4 @@ from the project root (`DATABASE_URL` is read from `.env`):
 | GET | `/api/v1/sample/{id}` | Get a sample by id |
 | POST | `/api/v1/sample` | Create a sample |
 | PUT | `/api/v1/sample/{id}` | Update a sample |
+| DELETE | `/api/v1/sample/{id}` | Delete a sample |
