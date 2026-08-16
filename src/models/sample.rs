@@ -29,6 +29,14 @@ pub struct SampleIdParams {
   pub id: i64,
 }
 
+#[derive(Deserialize, Validate)]
+pub struct SwapSampleNames {
+  #[validate(range(min = 1, message = "first_id must be a positive integer"))]
+  pub first_id: i64,
+  #[validate(range(min = 1, message = "second_id must be a positive integer"))]
+  pub second_id: i64,
+}
+
 fn validate_name(name: &str) -> Result<(), ValidationError> {
   if name.trim().is_empty() {
     return Err(

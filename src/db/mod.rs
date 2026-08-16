@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions, PgRow};
-use sqlx::{FromRow, Postgres, QueryBuilder};
+use sqlx::{Executor, FromRow, Postgres, QueryBuilder};
 use std::error::Error;
 use std::time::Duration;
 
@@ -112,10 +112,13 @@ impl<T: Into<SqlParam>> From<Option<T>> for SqlParam {
 /// Builds and runs `INSERT INTO <table> (<columns>) VALUES (...) RETURNING <returning>`,
 /// so any service can insert a row without hand-writing the query and bind chain.
 ///
+/// `executor` accepts either a `&PgPool` or a transaction (`&mut *tx`), so the insert
+/// can optionally run as part of a larger transaction.
+///
 /// `columns` and `values` must be the same length and in the same order, e.g.
 /// `db::insert::<Sample>(&pool, "sample_table", &["name"], vec![name.into()], "id, name, created_at")`.
-pub async fn insert<T>(
-  pool: &PgPool,
+pub async fn insert<'c, T, E>(
+  executor: E,
   table: &str,
   columns: &[&str],
   values: Vec<SqlParam>,
@@ -123,6 +126,7 @@ pub async fn insert<T>(
 ) -> Result<T, sqlx::Error>
 where
   T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+  E: Executor<'c, Database = Postgres>,
 {
   assert_eq!(columns.len(), values.len(), "columns and values must be the same length");
 
@@ -143,20 +147,24 @@ where
 
   builder.push(format!(") RETURNING {returning}"));
 
-  builder.build_query_as::<T>().fetch_one(pool).await
+  builder.build_query_as::<T>().fetch_one(executor).await
 }
 
 /// Runs `SELECT <columns> FROM <table>`, so any service can fetch every row without
 /// hand-writing the query, e.g. `db::find_all::<Sample>(&pool, "sample_table", "id, name, created_at")`.
 ///
+/// `executor` accepts either a `&PgPool` or a transaction (`&mut *tx`), so the query
+/// can optionally run as part of a larger transaction.
+///
 /// `table` and `columns` are developer-supplied identifiers, not user input, so the
 /// built string is asserted safe rather than bound as a value.
-pub async fn find_all<T>(pool: &PgPool, table: &str, select: &str) -> Result<Vec<T>, sqlx::Error>
+pub async fn find_all<'c, T, E>(executor: E, table: &str, select: &str) -> Result<Vec<T>, sqlx::Error>
 where
   T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+  E: Executor<'c, Database = Postgres>,
 {
   let query = sqlx::AssertSqlSafe(format!("SELECT {select} FROM {table}"));
-  sqlx::query_as::<_, T>(query).fetch_all(pool).await
+  sqlx::query_as::<_, T>(query).fetch_all(executor).await
 }
 
 /// Binds a single dynamically typed value onto a query builder in place.
@@ -175,8 +183,11 @@ fn bind_param(builder: &mut QueryBuilder<Postgres>, value: SqlParam) {
 /// one row. Lets any service look up a single record by a unique column (e.g. `id`)
 /// without hand-writing the query, e.g.
 /// `db::find_one::<Sample>(&pool, "sample_table", "id, name, created_at", "id", id.into())`.
-pub async fn find_one<T>(
-  pool: &PgPool,
+///
+/// `executor` accepts either a `&PgPool` or a transaction (`&mut *tx`), so the query
+/// can optionally run as part of a larger transaction.
+pub async fn find_one<'c, T, E>(
+  executor: E,
   table: &str,
   select: &str,
   search_by: &str,
@@ -184,21 +195,25 @@ pub async fn find_one<T>(
 ) -> Result<Option<T>, sqlx::Error>
 where
   T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+  E: Executor<'c, Database = Postgres>,
 {
   let mut builder: QueryBuilder<Postgres> =
     QueryBuilder::new(format!("SELECT {select} FROM {table} WHERE {search_by} = "));
 
   bind_param(&mut builder, value);
 
-  builder.build_query_as::<T>().fetch_optional(pool).await
+  builder.build_query_as::<T>().fetch_optional(executor).await
 }
 
 /// Builds and runs `UPDATE <table> SET <columns> = <values> WHERE <search_by> = <search_value>
 /// RETURNING <returning>`, returning the updated row, or `None` when no row matched.
 /// Lets any service update a row without hand-writing the query and bind chain, e.g.
 /// `db::update::<Sample>(&pool, "sample_table", &["name"], vec![name.into()], "id", id.into(), "id, name, created_at")`.
-pub async fn update<T>(
-  pool: &PgPool,
+///
+/// `executor` accepts either a `&PgPool` or a transaction (`&mut *tx`), so the update
+/// can optionally run as part of a larger transaction.
+pub async fn update<'c, T, E>(
+  executor: E,
   table: &str,
   columns: &[&str],
   values: Vec<SqlParam>,
@@ -208,6 +223,7 @@ pub async fn update<T>(
 ) -> Result<Option<T>, sqlx::Error>
 where
   T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+  E: Executor<'c, Database = Postgres>,
 {
   assert_eq!(columns.len(), values.len(), "columns and values must be the same length");
 
@@ -226,5 +242,5 @@ where
 
   builder.push(format!(" RETURNING {returning}"));
 
-  builder.build_query_as::<T>().fetch_optional(pool).await
+  builder.build_query_as::<T>().fetch_optional(executor).await
 }
