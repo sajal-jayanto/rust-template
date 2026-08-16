@@ -3,7 +3,7 @@ use sqlx::PgPool;
 
 use crate::db;
 use crate::middleware::validation::{internal_error, not_found, ErrorResponse, ValidatedJson, ValidatedPath};
-use crate::models::sample::{CreateSample, Sample, SampleIdParams};
+use crate::models::sample::{CreateSample, Sample, SampleIdParams, UpdateSample};
 
 pub async fn get_all_sample(
   Extension(pool): Extension<PgPool>,
@@ -54,4 +54,27 @@ pub async fn create_sample(
   .map_err(|_| internal_error("failed to create sample"))?;
 
   Ok((StatusCode::CREATED, Json(sample)))
+}
+
+pub async fn update_sample(
+  Extension(pool): Extension<PgPool>,
+  ValidatedPath(params): ValidatedPath<SampleIdParams>,
+  ValidatedJson(payload): ValidatedJson<UpdateSample>,
+) -> Result<Json<Sample>, (StatusCode, Json<ErrorResponse>)> {
+  let name = payload.name.trim().to_string();
+
+  let sample = db::update::<Sample>(
+    &pool,
+    "sample_table",
+    &["name"],
+    vec![name.into()],
+    "id",
+    params.id.into(),
+    "id, name, created_at",
+  )
+  .await
+  .map_err(|_| internal_error("failed to update sample"))?
+  .ok_or_else(|| not_found("sample not found"))?;
+
+  Ok(Json(sample))
 }

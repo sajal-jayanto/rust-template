@@ -18,6 +18,12 @@ pub struct CreateSample {
 }
 
 #[derive(Deserialize, Validate)]
+pub struct UpdateSample {
+  #[validate(custom(function = "validate_name"))]
+  pub name: String,
+}
+
+#[derive(Deserialize, Validate)]
 pub struct SampleIdParams {
   #[validate(range(min = 1, message = "id must be a positive integer"))]
   pub id: i64,

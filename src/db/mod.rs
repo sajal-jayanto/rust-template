@@ -159,7 +159,19 @@ where
   sqlx::query_as::<_, T>(query).fetch_all(pool).await
 }
 
-/// Runs `SELECT <selects> FROM <table> WHERE <search_by> = <value>`, returning at most
+/// Binds a single dynamically typed value onto a query builder in place.
+fn bind_param(builder: &mut QueryBuilder<Postgres>, value: SqlParam) {
+  match value {
+    SqlParam::Text(v) => builder.push_bind(v),
+    SqlParam::Int(v) => builder.push_bind(v),
+    SqlParam::Bool(v) => builder.push_bind(v),
+    SqlParam::Float(v) => builder.push_bind(v),
+    SqlParam::Timestamp(v) => builder.push_bind(v),
+    SqlParam::Null => builder.push_bind(None::<String>),
+  };
+}
+
+/// Runs `SELECT <select> FROM <table> WHERE <search_by> = <value>`, returning at most
 /// one row. Lets any service look up a single record by a unique column (e.g. `id`)
 /// without hand-writing the query, e.g.
 /// `db::find_one::<Sample>(&pool, "sample_table", "id, name, created_at", "id", id.into())`.
@@ -176,14 +188,43 @@ where
   let mut builder: QueryBuilder<Postgres> =
     QueryBuilder::new(format!("SELECT {select} FROM {table} WHERE {search_by} = "));
 
-  match value {
-    SqlParam::Text(v) => builder.push_bind(v),
-    SqlParam::Int(v) => builder.push_bind(v),
-    SqlParam::Bool(v) => builder.push_bind(v),
-    SqlParam::Float(v) => builder.push_bind(v),
-    SqlParam::Timestamp(v) => builder.push_bind(v),
-    SqlParam::Null => builder.push_bind(None::<String>),
-  };
+  bind_param(&mut builder, value);
+
+  builder.build_query_as::<T>().fetch_optional(pool).await
+}
+
+/// Builds and runs `UPDATE <table> SET <columns> = <values> WHERE <search_by> = <search_value>
+/// RETURNING <returning>`, returning the updated row, or `None` when no row matched.
+/// Lets any service update a row without hand-writing the query and bind chain, e.g.
+/// `db::update::<Sample>(&pool, "sample_table", &["name"], vec![name.into()], "id", id.into(), "id, name, created_at")`.
+pub async fn update<T>(
+  pool: &PgPool,
+  table: &str,
+  columns: &[&str],
+  values: Vec<SqlParam>,
+  search_by: &str,
+  search_value: SqlParam,
+  returning: &str,
+) -> Result<Option<T>, sqlx::Error>
+where
+  T: for<'r> FromRow<'r, PgRow> + Send + Unpin,
+{
+  assert_eq!(columns.len(), values.len(), "columns and values must be the same length");
+
+  let mut builder: QueryBuilder<Postgres> = QueryBuilder::new(format!("UPDATE {table} SET "));
+
+  for (i, (column, value)) in columns.iter().zip(values).enumerate() {
+    if i > 0 {
+      builder.push(", ");
+    }
+    builder.push(format!("{column} = "));
+    bind_param(&mut builder, value);
+  }
+
+  builder.push(format!(" WHERE {search_by} = "));
+  bind_param(&mut builder, search_value);
+
+  builder.push(format!(" RETURNING {returning}"));
 
   builder.build_query_as::<T>().fetch_optional(pool).await
 }
